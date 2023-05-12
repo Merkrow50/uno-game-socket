@@ -44,7 +44,7 @@ public class Carta {
 
     @Override
     public String toString() {
-        return "Carta:" + valor +
+        return "" + valor + " " +
                 cor +
                 '}';
     }

@@ -23,7 +23,7 @@ public class CartaEspecial {
 
     @Override
     public String toString() {
-        return "Carta:" + valorEspecial +
+        return "" + valorEspecial +
                 '}';
     }
 }
