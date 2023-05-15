@@ -1,89 +1,150 @@
 import java.io.*;
 import java.net.Socket;
+import java.util.Objects;
 import java.util.Scanner;
 
 public class Client {
 
-    private final String HOST = "localhost";
-    private final int PORT = 5000;
+  private final String HOST = "localhost";
+  private final int PORT = 5000;
 
-    private Socket socket;
-    private ObjectInputStream in;
-    private ObjectOutputStream out;
+  private ObjectInputStream in;
+  private ObjectOutputStream out;
 
-    private Scanner input;
+  private final Scanner input;
 
-    private Player currentPlayer = new Player();
+  private Player currentPlayer = new Player();
 
-
-    public Client() throws IOException {
-        this.input = new Scanner(System.in);
-        this.in = new ObjectInputStream(socket.getInputStream());
-    } // fim do construtor()
-
-    public static void main(String[] args) throws IOException {
-        new Client().start();
-    } // fim do método main(String[])
-
-    private void start() {
-        try (Socket socket = new Socket(HOST, PORT)) {
-            this.out = new ObjectOutputStream(socket.getOutputStream());
-            play(socket);
-        } catch (Exception e) {
-            System.err.println("[CLIENT] Erro no start: " + e.getMessage());
-            e.printStackTrace();
-        }
-    } // fim do método start()
-
-    private void play(Socket socket) {
-        try {
-
-            do {
-                createPlayer();
-                run();
-
-            } while (true);
+  private static Status status = Status.WAIT;
+  private Socket socket;
 
 
-        } catch (Exception e) {
+  public Client() {
+    this.input = new Scanner(System.in);
+  }
+
+  public static void main(String[] args) {
+    new Client().start();
+  }
+
+  private void start() {
+    connection();
+    run();
+  }
+
+  private void connection() {
+    try {
+      this.socket = new Socket(HOST, PORT);
+      System.out.println("Cliente conectado");
+      this.out = new ObjectOutputStream(socket.getOutputStream());
+    } catch (Exception e) {
+      System.err.println("[CLIENT] Erro no send: " + e.getMessage());
+      e.printStackTrace();
+    }
+  }
+
+  private void run() {
+
+    do {
+      setPlayer();
+      getPlayer();
+      init();
+    } while (true);
+
+  }
+
+  private void init() {
+
+    if (currentPlayer.getId().equals("1")) {
+      System.out.println("Você é o dono da sala para iniciar o jogo digite [iniciar]: ");
+
+      String iniciar = null;
+
+      while (!Objects.equals(iniciar, "iniciar")) {
+        iniciar = input.nextLine();
+        if (iniciar.equals("iniciar")) {
+          try {
+            this.out.writeObject(Status.STARTED);
+          } catch (Exception e) {
             System.err.println("[CLIENT] Erro no send: " + e.getMessage());
             e.printStackTrace();
+          }
+        } else {
+          System.out.print("Opção invalida, tente novamente!\n");
         }
-    } // fim do método send()
-
-
-    private void run(){
-
-        if(currentPlayer.getId().equals("1")) {
-            if(input.nextLine().equals("iniciar")){
-                System.out.print("Iniciando jogo...");
-            }
+      }
+      new Thread(t1).start();
+    } else {
+      System.out.print("Aguardando o dono da sala iniciar o jogo...");
+      do {
+        try {
+          System.out.print("Aguardando o dono da sala iniciar o jogo...\n");
+          new Thread(t1).start();
+          Thread.sleep(5000L);
+        } catch (Exception e) {
+          System.err.println("[CLIENT] Erro no send: " + e.getMessage());
+          e.printStackTrace();
         }
-
+      } while (status.equals(Status.WAIT));
     }
+  }
 
+  private void waitToStartGame() throws IOException, ClassNotFoundException {
+    do {
+      status = (Status) in.readObject();
+    } while (!status.equals(Status.STARTED));
+    System.out.println("[Client] iniciando jogo...");
+  }
 
-    private void createPlayer() throws IOException, ClassNotFoundException {
+  private final Runnable t1 = () -> {
+    try {
+      waitToStartGame();
+    } catch (Exception e) {
+      System.err.println("[SERVER] Erro no answer: " + e.getMessage());
+      e.printStackTrace();
+    }
+  };
 
-        boolean valid = true;
+  private void getPlayer() {
+    try {
+      this.in = new ObjectInputStream(socket.getInputStream());
+      this.currentPlayer = (Player) in.readObject();
+      System.out.println("Player " + currentPlayer.getName() + " criado com sucesso!");
+    } catch (Exception e) {
+      System.err.println("[CLIENT] Erro no send: " + e.getMessage());
+      e.printStackTrace();
+    }
+  }
 
-        do {
-            System.out.print("Informe seu nome: ");
-            currentPlayer.setName(input.nextLine());
+  private void setPlayer() {
 
-            valid = !currentPlayer.getName().isBlank();
-            if (!valid) {
-                System.out.println("[ERRO] Nome não pode ser vazio.");
-            }
+    try {
+      boolean valid = true;
+      String name;
 
-            this.out.writeObject(currentPlayer);
+      do {
 
-        } while (!valid);
+        System.out.print("Informe seu nome: ");
+        name = input.nextLine();
 
+        valid = name.isBlank();
+        if (valid) {
+          System.out.println("[ERRO] Nome não pode ser vazio.");
+        }
 
-        this.currentPlayer = (Player) in.readObject();
-        System.out.println("Olá " + currentPlayer.toString());
+        send(name);
 
-    } // fim do método createPlayer()
+      } while (valid);
+    } catch (Exception e) {
+      System.err.println("[CLIENT] Erro no send: " + e.getMessage());
+      e.printStackTrace();
+    }
+  }
+
+  private void send(String name) throws IOException {
+    Player player = new Player();
+    player.setName(name);
+    this.out.writeObject(player);
+  }
 
 }

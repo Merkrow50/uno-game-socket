@@ -3,8 +3,13 @@ import java.io.Serializable;
 public class Player implements Serializable {
 
     private String id;
-
     private String name;
+
+    private Hand hand;
+
+    public Hand getHand() {
+        return hand;
+    }
 
     public void setName(String name) {
         this.name = name;
