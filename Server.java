@@ -1,72 +1,150 @@
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.io.ObjectInputStream;
-import java.io.PrintWriter;
+import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.ArrayList;
+import java.util.List;
 
 public class Server {
 
-    private static final int PORT = 5000;
+  private List<Player> players;
+  private Game game;
+  private ServerSocket serverSocket;
 
-    private ArrayList<Player> players;
+  private static final int PORT = 5000;
 
-    public static void main(String[] args) {
-        Server server = new Server();
-        server.start();
-    } // fim do método main(String[])
 
-    private void start() {
-        System.out.println("[SERVER] Iniciando o servidor...");
-        try (ServerSocket serverSocket = new ServerSocket(PORT)) {
-            System.out.println("[SERVER] Servidor iniciado");
+  public Server() {
+    players = new ArrayList<>();
+    game = new Game();
 
-            while (true) {
-                System.out.println("[SERVER] Aguardando conexão...");
-                Socket socket = serverSocket.accept();
-                System.out.println("[SERVER] Conexão aceita");
+    try {
+      serverSocket = new ServerSocket(PORT);
+    } catch (IOException e) {
+      e.printStackTrace();
+    }
+  }
 
-                answer(socket);
+  public static void main(String[] args) throws IOException {
+    Server server = new Server();
+    server.start();
+  }
 
-            }
-        } catch (Exception e) {
-            System.err.println("[SERVER] Erro no start: " + e.getMessage());
-            e.printStackTrace();
-        }
-    } // fim do método start()
+  public void start() throws IOException {
+    System.out.println("Server iniciado. Esperando jogadores conectar...");
 
-    private void registry(Player player, PrintWriter out) {
+    while (players.size() < 2) {
+      try {
+        Socket socket = serverSocket.accept();
+        Player player = new Player(socket);
+        players.add(player);
 
-        System.out.println("[SERVER] Registrando jogador...");
-
-        if (this.players.size() >= 10) {
-            System.err.println("[SERVER] ERRO: Limite de jogadores atingido");
-            out.printf("Limite de jogadores atingido");
-        } else {
-            this.players.add(player);
-            System.out.println("[SERVER] Jogador registrado [" + players.size() + "/10]");
-            out.printf("Jogador registrado [%s!]\n", player.getName());
-        }
-
+        Thread playerThread = new Thread(player);
+        playerThread.start();
+      } catch (IOException e) {
+        e.printStackTrace();
+      }
     }
 
-    private void answer(Socket socket) {
-        try {
-            ObjectInputStream in = new ObjectInputStream(socket.getInputStream());
-            Player player = (Player) in.readObject();
+    System.out.println("Jogo iniciado...");
+    game.addPlayer(players.get(0));
+    game.addPlayer(players.get(1));
+    game.startGame();
 
-            PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+    broadcastMessage("Jogo Iniciado!");
 
-            registry(player, out);
+    while (game.isGameInProgress()) {
+      execute();
+    }
 
-            out.printf("Servidor respondeu: Hello, %s!\n", player.getName());
+    endGame();
+  }
 
-        } catch (Exception e) {
-            System.err.println("[SERVER] Erro no answer: " + e.getMessage());
-            e.printStackTrace();
+  private void execute() throws IOException {
+    Player currentPlayer = players.get(game.getCurrentPlayerIndex());
+    Card.Color currentColor = game.getCurrentColor();
+    List<Card> cardPlayableList = currentPlayer.getPlayableCards(currentColor);
+
+    if (cardPlayableList.isEmpty()) {
+      Card cardToAdd = game.drawCard();
+      currentPlayer.getHand().add(cardToAdd);
+      game.updateCurrentPlayerIndex();
+      broadcastMessage(currentPlayer.getName() + " comprou uma carta!");
+      if (game.isGameInProgress()) {
+        Player nextPlayer = players.get(game.getCurrentPlayerIndex());
+        nextPlayer.sendMessage("Espere pelo seu turno...");
+      }
+
+      execute();
+
+    } else  {
+      turn();
+    }
+  }
+
+  private String displayCards(List<Card> cards){
+    String hand = "";
+
+    for (int i = 0; i < cards.size(); i++){
+     hand = hand.concat(String.format("[(index: %s), (Carta: %s)], \n", i, cards.get(i).toString()));
+    }
+
+    return hand;
+  }
+
+  private void turn() throws IOException {
+    Player currentPlayer = players.get(game.getCurrentPlayerIndex());
+    Card.Color currentColor = game.getCurrentColor();
+    Card topCard = game.getDiscardPile().get(game.getDiscardPile().size() - 1);
+
+    currentPlayer.sendMessage("Seu Turno! Carta Atual: " + topCard.toString());
+    currentPlayer.sendMessage("Suas Cartas: " + displayCards(currentPlayer.getHand()));
+    currentPlayer.sendMessage("Movimentos Válidos: " + displayCards(currentPlayer.getPlayableCards(currentColor)));
+    currentPlayer.sendMessage("Insira o index da carta valida que voce quer jogar:");
+
+    String input = currentPlayer.receiveMessage();
+
+    try {
+
+      int cardIndex = Integer.parseInt(input);
+      Card selectedCard = currentPlayer.getHand().get(cardIndex);
+
+      if (game.processMove(currentPlayer, selectedCard)) {
+        broadcastMessage(currentPlayer.getName() + " jogou " + selectedCard.toString());
+
+        if (game.isGameInProgress()) {
+          Player nextPlayer = players.get(game.getCurrentPlayerIndex());
+          nextPlayer.sendMessage("Espere pelo seu turno...");
         }
-    } // fim do método answer(Socket)
+      } else {
+        currentPlayer.sendMessage("Movimento Invalido! Tente Novamente.");
+      }
 
+    } catch (NumberFormatException | IndexOutOfBoundsException e) {
+      currentPlayer.sendMessage("Mensagem Invalida! Tente Novamente.");
+    }
+  }
+
+  private void endGame() throws IOException {
+    Player winner = players.get(0);
+    int minScore = winner.getPoints();
+
+    for (int i = 1; i < players.size(); i++) {
+      Player player = players.get(i);
+      int score = player.getPoints();
+
+      if (score < minScore) {
+        winner = player;
+        minScore = score;
+      }
+    }
+
+    broadcastMessage("Fim de jogo! " + winner.getName() + " vencedor com " + winner.getPoints() + " pontos");
+  }
+
+  private void broadcastMessage(String message) throws IOException {
+    for (Player player : players) {
+      player.sendMessage(message);
+    }
+  }
 
 }
